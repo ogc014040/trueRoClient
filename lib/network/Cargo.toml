@@ -1,0 +1,13 @@
+[package]
+name = "ragnarok-network"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ragnarok-game = { workspace = true }
+ragnarok-profiling = { workspace = true }
+packets = { workspace = true }
+models = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+encoding_rs = { workspace = true }

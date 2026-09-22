@@ -1,0 +1,18 @@
+[package]
+name = "ragnarok-grf-editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ragnarok-resources = { workspace = true }
+ragnarok-formats = { workspace = true }
+ragnarok-renderer = { workspace = true }
+ragnarok-game = { workspace = true }
+ragnarok-audio = { workspace = true }
+eframe = { workspace = true }
+egui_ltreeview = "0.6.1"
+glam = { workspace = true }
+image = { workspace = true }
+rfd = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

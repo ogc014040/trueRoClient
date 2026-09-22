@@ -1,0 +1,78 @@
+[workspace]
+members = [
+    "client",
+    "lib/formats",
+    "lib/resources",
+    "lib/renderer",
+    "lib/game",
+    "lib/ai",
+    "lib/effects",
+    "lib/network",
+    "lib/profiling",
+    "lib/ui-core",
+    "lib/ui-component",
+    "lib/audio",
+    "tools",
+    "tools/grf-editor",
+    "tools/effect-viewer-hot",
+    "tools/rendering-viewer-hot",
+    "tools/rsw-viewer-hot",
+    "tools/ui-component-hot",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# Needed by server's models crate (workspace = true)
+
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
+# Needed by server's packets crate (workspace = true)
+byteorder = "1.5.0"
+json-flat-parser = "0.1.0"
+flate2 = "1.1"
+encoding_rs = "0.8"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+wgpu = "28"
+winit = "0.30"
+wayland-client = "0.31"
+xkbcommon-dl = "0.4"
+x11rb = "0.13"
+glam = "0.32"
+bytemuck = { version = "1.25", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp"] }
+ab_glyph = "0.2"
+eframe = "0.33.3"
+rfd = "0.15"
+tokio = { version = "1", features = ["net", "rt", "sync", "macros", "io-util", "time"] }
+cpal = "0.16"
+symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "adpcm", "mp3"] }
+puffin = "0.20"
+puffin_http = "0.17"
+
+# Server crate git dependencies
+models = { git = "https://github.com/nmeylan/rust-ro.git", rev = "2e673a24" }
+movement = { git = "https://github.com/nmeylan/rust-ro.git", rev = "2e673a24" }
+packets = { git = "https://github.com/nmeylan/rust-ro.git", rev = "2e673a24" }
+
+# Internal crates
+ragnarok-formats = { path = "lib/formats" }
+ragnarok-resources = { path = "lib/resources" }
+ragnarok-renderer = { path = "lib/renderer" }
+ragnarok-game = { path = "lib/game" }
+ragnarok-ai = { path = "lib/ai" }
+ragnarok-effects = { path = "lib/effects" }
+ragnarok-network = { path = "lib/network" }
+ragnarok-profiling = { path = "lib/profiling" }
+ragnarok-ui = { path = "lib/ui-core" }
+ragnarok-ui-component = { path = "lib/ui-component" }
+ragnarok-audio = { path = "lib/audio" }
+libloading = "0.8"
+
+
+#[patch."https://github.com/nmeylan/rust-ro.git"]
+#packets = { path = "../rust-ragnarok-server/lib/packets" }
+#models = { path = "../rust-ragnarok-server/lib/models" }
+#movement = { path = "../rust-ragnarok-server/lib/movement" }

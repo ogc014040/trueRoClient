@@ -1,0 +1,22 @@
+[package]
+name = "ragnarok-ui-component"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ragnarok-ui = { workspace = true }
+ragnarok-resources = { workspace = true }
+ragnarok-game = { workspace = true }
+ragnarok-ai = { workspace = true }
+ragnarok-renderer = { workspace = true }
+
+[dev-dependencies]
+ragnarok-ui = { workspace = true, features = ["test-support"] }
+models = { workspace = true }
+ragnarok-formats = { workspace = true }
+winit = { workspace = true }
+wgpu = { workspace = true }
+image = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+libloading = { workspace = true }
