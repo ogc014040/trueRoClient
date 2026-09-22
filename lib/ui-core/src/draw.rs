@@ -408,8 +408,14 @@ pub fn strip_color_codes(text: &str) -> String {
                 continue;
             }
         }
-        result.push(bytes[i] as char);
-        i += 1;
+        // `i` is always on a char boundary here: either the start of the
+        // string, or just past a `^RRGGBB` escape (7 ASCII bytes) or a
+        // previous full char. Casting `bytes[i] as char` instead would treat
+        // each byte of a multi-byte UTF-8 sequence (e.g. CJK text) as its
+        // own Latin-1 codepoint and corrupt it.
+        let ch = text[i..].chars().next().unwrap();
+        result.push(ch);
+        i += ch.len_utf8();
     }
 
     result
@@ -765,6 +771,12 @@ mod tests {
         assert_eq!(strip_color_codes("^FF0000Red ^000000Black"), "Red Black");
         assert_eq!(strip_color_codes("No codes"), "No codes");
         assert_eq!(strip_color_codes("^FF00short"), "^FF00short");
+    }
+
+    #[test]
+    fn strip_color_codes_preserves_multibyte_utf8() {
+        assert_eq!(strip_color_codes("^FF0000棉襯衫^000000"), "棉襯衫");
+        assert_eq!(strip_color_codes("가나다"), "가나다");
     }
 
     #[test]

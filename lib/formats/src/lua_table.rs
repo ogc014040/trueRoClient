@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::lua_source;
 use crate::lub;
 use crate::lub::{LuaState, LubError};
 
@@ -291,6 +292,106 @@ pub fn parse_job_name_lub(chunks: &[&[u8]]) -> Result<HashMap<u16, String>, LubE
         }
     }
     Ok(names)
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ItemInfoLub {
+    pub identified_resource: HashMap<u16, String>,
+    pub unidentified_resource: HashMap<u16, String>,
+    pub identified_name: HashMap<u16, String>,
+    pub unidentified_name: HashMap<u16, String>,
+    pub identified_description: HashMap<u16, Vec<String>>,
+    pub unidentified_description: HashMap<u16, Vec<String>>,
+}
+
+/// Parses `System/iteminfo_new.lub`: a chunk that builds one global table
+/// `tbl`, keyed by item id, each entry holding identified/unidentified
+/// display name, resource name (the icon/sprite lookup key) and description
+/// lines. Supersedes the classic `id#value` GRF text tables this client used
+/// to read separately (`parse_item_res_table`, `parse_item_name_table`,
+/// `parse_item_description_table`).
+///
+/// Accepts either a compiled chunk (the shipped `.lub`, UTF-8 strings) or
+/// plain-text Lua source (a hand-maintained replacement, Big5-encoded
+/// strings) — some servers distribute the latter since it's editable without
+/// a Lua compiler. Both converge on the same [`LuaState`], so the rest of
+/// this function doesn't care which one it got.
+pub fn parse_item_info_lub(chunk: &[u8]) -> Result<ItemInfoLub, LubError> {
+    let mut state = LuaState::new();
+    if lub::is_compiled_chunk(chunk) {
+        lub::load_chunk(chunk, &mut state)?;
+    } else {
+        lua_source::parse_source_chunk(chunk, &mut state)?;
+    }
+    let entries = state.global_table("tbl").ok_or(LubError::TypeError)?;
+
+    let mut out = ItemInfoLub::default();
+    for (key, value) in entries {
+        let Some(id) = key.as_number().and_then(to_id) else {
+            continue;
+        };
+        let lub::Value::Table(item_index) = value else {
+            continue;
+        };
+        let Some(item) = state.table(*item_index) else {
+            continue;
+        };
+        for (field_key, field_value) in item {
+            let Some(field_name) = field_key.as_bytes() else {
+                continue;
+            };
+            match field_name {
+                b"identifiedDisplayName" => insert_str(&mut out.identified_name, id, field_value),
+                b"unidentifiedDisplayName" => {
+                    insert_str(&mut out.unidentified_name, id, field_value)
+                }
+                b"identifiedResourceName" => {
+                    insert_str(&mut out.identified_resource, id, field_value)
+                }
+                b"unidentifiedResourceName" => {
+                    insert_str(&mut out.unidentified_resource, id, field_value)
+                }
+                b"identifiedDescriptionName" => {
+                    insert_description(&mut out.identified_description, id, field_value, &state)
+                }
+                b"unidentifiedDescriptionName" => {
+                    insert_description(&mut out.unidentified_description, id, field_value, &state)
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn insert_str(map: &mut HashMap<u16, String>, id: u16, value: &lub::Value) {
+    if let Some(bytes) = value.as_bytes() {
+        map.insert(id, String::from_utf8_lossy(bytes).into_owned());
+    }
+}
+
+fn insert_description(
+    map: &mut HashMap<u16, Vec<String>>,
+    id: u16,
+    value: &lub::Value,
+    state: &LuaState,
+) {
+    let lub::Value::Table(index) = value else {
+        return;
+    };
+    let Some(table) = state.table(*index) else {
+        return;
+    };
+    let mut lines: Vec<(u64, String)> = table
+        .iter()
+        .filter_map(|(key, value)| {
+            let order = key.as_number()? as u64;
+            let text = value.as_bytes()?;
+            Some((order, String::from_utf8_lossy(text).into_owned()))
+        })
+        .collect();
+    lines.sort_by_key(|(order, _)| *order);
+    map.insert(id, lines.into_iter().map(|(_, line)| line).collect());
 }
 
 fn to_id(number: f64) -> Option<u16> {

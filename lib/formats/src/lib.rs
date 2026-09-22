@@ -8,6 +8,7 @@ pub mod gnd;
 pub mod gr2;
 pub mod grf;
 pub mod imf;
+pub mod lua_source;
 pub mod lua_table;
 pub mod lub;
 pub mod map_coordinates;

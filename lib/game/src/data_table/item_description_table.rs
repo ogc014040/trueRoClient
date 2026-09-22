@@ -8,8 +8,7 @@ pub struct ItemDescriptionTable {
     unidentified: HashMap<u16, Vec<String>>,
 }
 
-const IDENTIFIED_PATH: &str = ragnarok_resources::table::IDENTIFIED_ITEM_DESC;
-const UNIDENTIFIED_PATH: &str = ragnarok_resources::table::UNIDENTIFIED_ITEM_DESC;
+const ITEM_INFO_LUB_PATH: &str = ragnarok_resources::table::ITEM_INFO_LUB;
 
 impl ItemDescriptionTable {
     pub fn from_entries(
@@ -23,17 +22,15 @@ impl ItemDescriptionTable {
     }
 
     pub fn load(grf: &GrfArchive) -> Self {
-        let identified = grf
-            .read_file(IDENTIFIED_PATH)
-            .map(|data| lua_table::parse_item_description_table(&data))
-            .unwrap_or_default();
-        let unidentified = grf
-            .read_file(UNIDENTIFIED_PATH)
-            .map(|data| lua_table::parse_item_description_table(&data))
+        let (identified, unidentified) = grf
+            .read_file(ITEM_INFO_LUB_PATH)
+            .ok()
+            .and_then(|data| lua_table::parse_item_info_lub(&data).ok())
+            .map(|info| (info.identified_description, info.unidentified_description))
             .unwrap_or_default();
 
         tracing::info!(
-            "Loaded item description tables: {} identified, {} unidentified",
+            "Loaded item description tables from {ITEM_INFO_LUB_PATH}: {} identified, {} unidentified",
             identified.len(),
             unidentified.len(),
         );

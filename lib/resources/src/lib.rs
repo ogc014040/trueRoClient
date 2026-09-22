@@ -429,6 +429,7 @@ pub mod table {
         IDENTIFIED_ITEM_NAME = "data/idnum2itemdisplaynametable.txt";
         IDENTIFIED_ITEM_RESOURCE = "data/idnum2itemresnametable.txt";
         INDOOR_RSW = "data/indoorrswtable.txt";
+        ITEM_INFO_LUB = "data/System/iteminfo_new.lub";
         ITEM_SLOT_COUNT = "data/itemslotcounttable.txt";
         MAP_NAME = "data/mapnametable.txt";
         MAP_POSITION = "data/mappostable.txt";

@@ -6,6 +6,9 @@ use models::enums::skill_enums::SkillEnum;
 use ragnarok_game::ailment::OPT2_BLIND;
 use ragnarok_game::app_state::AppState;
 use ragnarok_game::entity::{EntityState, EntityType};
+use ragnarok_game::data_table::item_description_table::ItemDescriptionTable;
+use ragnarok_game::data_table::item_name_table::ItemNameTable;
+use ragnarok_game::data_table::item_resource_table::ItemResourceTable;
 use ragnarok_game::event::GameEvent;
 use ragnarok_game::keybinding::{HotkeyAction, KeyChord};
 use ragnarok_network::build_action_request_packet;
@@ -555,6 +558,16 @@ impl App {
                     grid.show_grid = !grid.show_grid;
                 }
                 self.game.debug_show_pick_bounds = !self.game.debug_show_pick_bounds;
+            }
+            // Dev-only: re-reads iteminfo_new.lub (name/resource/description) off
+            // `data_dir` without restarting, so edits can be tested live.
+            KeyCode::F9 => {
+                if let Some(grf) = &self.grf {
+                    self.game.data_table.item_name = Some(ItemNameTable::load(grf));
+                    self.game.data_table.item_resource = Some(ItemResourceTable::load(grf));
+                    self.game.data_table.item_description = Some(ItemDescriptionTable::load(grf));
+                    tracing::info!("Reloaded item info tables (F9)");
+                }
             }
             KeyCode::KeyP if self.input.ctrl_pressed => {
                 self.profiler.start();

@@ -1,8 +1,10 @@
 //! Reader for compiled Lua chunks (`.lub`), Lua 5.0 and 5.1.
 //!
 //! The data tables the client ships as `.lub` are straight-line chunks that
-//! build one global table out of constants, so only the seven opcodes they use
-//! are executed. Anything else is an error and the caller falls back.
+//! build one global table out of constants, so only the opcodes they use are
+//! executed (assignment/table opcodes, plus `SETLIST` for array-style table
+//! constructors such as item description lines). Anything else is an error
+//! and the caller falls back.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -13,6 +15,7 @@ const LUA50: u8 = 0x50;
 const LUA51: u8 = 0x51;
 
 const OP_LOADK: u32 = 1;
+const OP_LOADBOOL: u32 = 2;
 const OP_GETGLOBAL: u32 = 5;
 const OP_GETTABLE: u32 = 6;
 const OP_SETGLOBAL: u32 = 7;
@@ -20,6 +23,9 @@ const OP_SETTABLE: u32 = 9;
 const OP_NEWTABLE: u32 = 10;
 const OP_RETURN_50: u32 = 27;
 const OP_RETURN_51: u32 = 30;
+const OP_SETLIST_51: u32 = 34;
+const OP_CLOSURE_51: u32 = 36;
+const LFIELDS_PER_FLUSH: usize = 50;
 
 #[derive(Debug)]
 pub enum LubError {
@@ -30,6 +36,8 @@ pub enum LubError {
     BadConstant(u8),
     UnsupportedOpcode(u32),
     TypeError,
+    /// Plain-text `lua_source` parse failure at this byte offset.
+    SyntaxErrorAt(usize),
 }
 
 impl std::fmt::Display for LubError {
@@ -42,6 +50,7 @@ impl std::fmt::Display for LubError {
             LubError::BadConstant(t) => write!(f, "unknown constant type {t}"),
             LubError::UnsupportedOpcode(op) => write!(f, "unsupported opcode {op}"),
             LubError::TypeError => write!(f, "value is not of the expected type"),
+            LubError::SyntaxErrorAt(pos) => write!(f, "lua source syntax error at byte {pos}"),
         }
     }
 }
@@ -129,6 +138,28 @@ impl LuaState {
 
     pub fn tables(&self) -> impl Iterator<Item = &Table> {
         self.tables.iter()
+    }
+
+    /// Looks up a table by the index stored in a `Value::Table`/`Key::Table`
+    /// handle, e.g. a nested table found while walking an outer one.
+    pub fn table(&self, index: usize) -> Option<&Table> {
+        self.tables.get(index)
+    }
+
+    /// Allocates a new empty table and returns its index, for a front end
+    /// other than [`execute`] (e.g. `lua_source`'s plain-text parser) that
+    /// builds up the same [`LuaState`] a compiled chunk would.
+    pub(crate) fn new_table(&mut self) -> usize {
+        self.tables.push(Table::new());
+        self.tables.len() - 1
+    }
+
+    pub(crate) fn table_mut(&mut self, index: usize) -> Option<&mut Table> {
+        self.tables.get_mut(index)
+    }
+
+    pub(crate) fn set_global(&mut self, name: &str, value: Value) {
+        self.globals.insert(Rc::from(name.as_bytes()), value);
     }
 }
 
@@ -372,7 +403,11 @@ fn execute(function: &Function, version: u8, state: &mut LuaState) -> Result<(),
             .ok_or(LubError::TypeError)
     };
 
-    for &instruction in &function.code {
+    let code = &function.code;
+    let mut pc = 0usize;
+    while pc < code.len() {
+        let instruction = code[pc];
+        pc += 1;
         let opcode = instruction & 0x3f;
         if opcode == encoding.return_opcode() {
             break;
@@ -389,6 +424,12 @@ fn execute(function: &Function, version: u8, state: &mut LuaState) -> Result<(),
         };
         match opcode {
             OP_LOADK => registers[a] = constant(encoding.bx(instruction))?,
+            OP_LOADBOOL => {
+                registers[a] = Value::Bool(encoding.b(instruction) != 0);
+                if encoding.c(instruction) != 0 {
+                    pc += 1;
+                }
+            }
             OP_NEWTABLE => {
                 state.tables.push(Table::new());
                 registers[a] = Value::Table(state.tables.len() - 1);
@@ -430,6 +471,35 @@ fn execute(function: &Function, version: u8, state: &mut LuaState) -> Result<(),
                 };
                 state.globals.insert(name, registers[a].clone());
             }
+            OP_SETLIST_51 if version == LUA51 => {
+                let Value::Table(index) = &registers[a] else {
+                    return Err(LubError::TypeError);
+                };
+                let index = *index;
+                let n = encoding.b(instruction) as usize;
+                let mut block = encoding.c(instruction) as usize;
+                if n == 0 {
+                    // "set to top" form (last array element is a call/vararg
+                    // result): this interpreter has no stack-top concept.
+                    return Err(LubError::UnsupportedOpcode(opcode));
+                }
+                if block == 0 {
+                    block = *code.get(pc).ok_or(LubError::UnexpectedEof)? as usize;
+                    pc += 1;
+                }
+                let base = (block - 1) * LFIELDS_PER_FLUSH;
+                let table = state.tables.get_mut(index).ok_or(LubError::TypeError)?;
+                for offset in 1..=n {
+                    let value = register(&registers, (a + offset) as u32)?;
+                    table.insert(Key::Number(((base + offset) as f64).to_bits()), value);
+                }
+            }
+            // Some dumps end with `setmetatable(tbl, {__index = function() ... end})`
+            // for a fallback entry. All the straight-line table assignments this
+            // reader cares about are already done by the time a closure is built
+            // (the closure's own body is a separate, never-executed prototype), so
+            // treat it as an implicit end of the chunk rather than an error.
+            OP_CLOSURE_51 if version == LUA51 => break,
             other => return Err(LubError::UnsupportedOpcode(other)),
         }
     }

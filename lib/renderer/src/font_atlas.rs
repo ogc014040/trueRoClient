@@ -4,6 +4,12 @@ use std::collections::HashMap;
 const FALLBACK_FONT: &[u8] = include_bytes!("fonts/NotoSans-Regular.ttf");
 const BOLD_FONT: &[u8] = include_bytes!("fonts/NotoSans-Bold.ttf");
 const CJK_FONT: &[u8] = include_bytes!("fonts/NotoSansKR-Regular.otf");
+/// `NotoSansKR` only carries the Hanja subset used in Korean, so Traditional
+/// Chinese text (e.g. item info from `iteminfo_new.lub`, TW-localized fonts
+/// shipped in the GRF) falls back here. Subsetted from Windows' bundled
+/// Microsoft JhengHei (face 0 of `msjh.ttc`) down to Big5 + ASCII with
+/// `fonttools`' `pyftsubset` to keep the embedded size reasonable.
+const TC_FONT: &[u8] = include_bytes!("fonts/MicrosoftJhengHei-Subset.ttf");
 
 /// ASCII bold glyphs are packed into the same atlas at this Private-Use offset,
 /// so a single texture holds both weights. Map with [`bold_char`].
@@ -60,6 +66,44 @@ pub fn euc_kr_charset() -> Vec<char> {
     out
 }
 
+/// The embedded Traditional Chinese fallback font (see [`TC_FONT`]), for
+/// callers building an atlas around a different primary font (e.g. one
+/// loaded from the GRF) via [`FontAtlas::build_with_fallback`].
+pub fn tc_fallback_font() -> &'static [u8] {
+    TC_FONT
+}
+
+/// Every non-ASCII character the Big5 decoder can produce, so any Traditional
+/// Chinese text (item info, TW-localized GRF text) has a glyph instead of
+/// falling back to `?`. Mirrors [`euc_kr_charset`].
+pub fn big5_charset() -> Vec<char> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut buf = [0u8; 2];
+    for lead in 0x81u8..=0xFE {
+        for trail in 0x40u8..=0xFE {
+            if trail == 0x7F {
+                continue;
+            }
+            buf[0] = lead;
+            buf[1] = trail;
+            let (decoded, _, had_errors) = encoding_rs::BIG5.decode(&buf);
+            if had_errors {
+                continue;
+            }
+            let mut it = decoded.chars();
+            if let (Some(ch), None) = (it.next(), it.next())
+                && !ch.is_ascii()
+                && !ch.is_control()
+                && seen.insert(ch)
+            {
+                out.push(ch);
+            }
+        }
+    }
+    out
+}
+
 pub struct FontAtlas {
     pub image: image::RgbaImage,
     pub glyphs: HashMap<char, GlyphInfo>,
@@ -73,8 +117,10 @@ impl FontAtlas {
         Self::build(FALLBACK_FONT, px_height, dpi_scale)
     }
 
+    /// Korean (`NotoSansKR`'s Hanja subset) plus Traditional Chinese (see
+    /// [`TC_FONT`]) for characters the Korean font has no glyph for.
     pub fn from_embedded_cjk(px_height: f32, dpi_scale: f32, extra_chars: &[char]) -> Self {
-        Self::build_with_extra_chars(CJK_FONT, px_height, dpi_scale, extra_chars)
+        Self::build_impl(CJK_FONT, Some(TC_FONT), px_height, dpi_scale, extra_chars)
     }
 
     pub fn build(font_data: &[u8], px_height: f32, dpi_scale: f32) -> Self {
@@ -87,9 +133,42 @@ impl FontAtlas {
         dpi_scale: f32,
         extra_chars: &[char],
     ) -> Self {
+        Self::build_impl(font_data, None, px_height, dpi_scale, extra_chars)
+    }
+
+    /// Like [`Self::build_with_extra_chars`], but characters missing from
+    /// `font_data` are rendered from `fallback_font_data` instead of coming
+    /// out blank — used to pair a GRF-provided Korean font with the embedded
+    /// Traditional Chinese fallback.
+    pub fn build_with_fallback(
+        font_data: &[u8],
+        fallback_font_data: &[u8],
+        px_height: f32,
+        dpi_scale: f32,
+        extra_chars: &[char],
+    ) -> Self {
+        Self::build_impl(
+            font_data,
+            Some(fallback_font_data),
+            px_height,
+            dpi_scale,
+            extra_chars,
+        )
+    }
+
+    fn build_impl(
+        font_data: &[u8],
+        fallback_font_data: Option<&[u8]>,
+        px_height: f32,
+        dpi_scale: f32,
+        extra_chars: &[char],
+    ) -> Self {
         let physical_height = px_height * dpi_scale;
         let font = FontRef::try_from_slice(font_data).expect("invalid font data");
         let scaled = font.as_scaled(physical_height);
+        let fallback_font = fallback_font_data
+            .map(|data| FontRef::try_from_slice(data).expect("invalid fallback font data"));
+        let fallback_scaled = fallback_font.as_ref().map(|f| f.as_scaled(physical_height));
 
         let line_height = (scaled.height() + scaled.line_gap()) / dpi_scale;
         let ascent = scaled.ascent() / dpi_scale;
@@ -117,11 +196,21 @@ impl FontAtlas {
         )> = Vec::new();
 
         for &ch in &chars {
-            let glyph_id = font.glyph_id(ch);
-            let glyph =
-                glyph_id.with_scale_and_position(physical_height, ab_glyph::point(0.0, 0.0));
-            let outlined = font.outline_glyph(glyph);
-            let advance = scaled.h_advance(glyph_id);
+            let primary_id = font.glyph_id(ch);
+            let (glyph_id, outlined, advance) = if primary_id.0 != 0 {
+                let glyph =
+                    primary_id.with_scale_and_position(physical_height, ab_glyph::point(0.0, 0.0));
+                (primary_id, font.outline_glyph(glyph), scaled.h_advance(primary_id))
+            } else if let (Some(fb_font), Some(fb_scaled)) = (&fallback_font, &fallback_scaled) {
+                let fb_id = fb_font.glyph_id(ch);
+                let glyph =
+                    fb_id.with_scale_and_position(physical_height, ab_glyph::point(0.0, 0.0));
+                (fb_id, fb_font.outline_glyph(glyph), fb_scaled.h_advance(fb_id))
+            } else {
+                let glyph =
+                    primary_id.with_scale_and_position(physical_height, ab_glyph::point(0.0, 0.0));
+                (primary_id, font.outline_glyph(glyph), scaled.h_advance(primary_id))
+            };
             glyph_renders.push((ch, glyph_id, outlined, advance));
         }
 
@@ -325,6 +414,34 @@ mod tests {
             g.size[0] > 0.0 && g.size[1] > 0.0,
             "hangul glyph not rendered"
         );
+    }
+
+    #[test]
+    fn embedded_cjk_falls_back_to_traditional_chinese() {
+        let mut chars = euc_kr_charset();
+        chars.extend(big5_charset());
+        let a = FontAtlas::from_embedded_cjk(16.0, 1.0, &chars);
+        // NotoSansKR has no Han character outside the Korean Hanja subset;
+        // this one is only reachable through the TC_FONT fallback.
+        let g = a.glyph('棉');
+        assert!(
+            g.size[0] > 0.0 && g.size[1] > 0.0,
+            "traditional chinese glyph not rendered"
+        );
+        // Korean must still work alongside it.
+        let g = a.glyph('가');
+        assert!(
+            g.size[0] > 0.0 && g.size[1] > 0.0,
+            "hangul glyph regressed after adding TC fallback"
+        );
+    }
+
+    #[test]
+    fn big5_charset_maps_common_characters_not_question_mark() {
+        let chars = big5_charset();
+        assert!(chars.contains(&'棉'));
+        assert!(chars.contains(&'衫'));
+        assert!(chars.len() > 10_000);
     }
 
     #[test]

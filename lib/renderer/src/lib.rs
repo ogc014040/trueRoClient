@@ -1151,15 +1151,21 @@ impl Renderer {
     }
 
     pub fn try_load_grf_font(&mut self, grf: &GrfArchive) {
-        let extra_chars = font_atlas::euc_kr_charset();
+        // Korean (in case the GRF or embedded font is the original kRO one)
+        // plus Traditional Chinese (TW-localized item/NPC/chat text), so
+        // either language has a glyph instead of falling back to `?`.
+        let mut extra_chars = font_atlas::euc_kr_charset();
+        extra_chars.extend(font_atlas::big5_charset());
+
         let font_paths = [
             ragnarok_resources::font::NANUM_BARUN_GOTHIC_BOLD,
             ragnarok_resources::font::NANUM_BARUN_GOTHIC,
         ];
         for path in &font_paths {
             if let Ok(data) = grf.read_file(path) {
-                self.set_font_atlas(FontAtlas::build_with_extra_chars(
+                self.set_font_atlas(FontAtlas::build_with_fallback(
                     &data,
+                    font_atlas::tc_fallback_font(),
                     self.font_px_height,
                     self.dpi_scale,
                     &extra_chars,

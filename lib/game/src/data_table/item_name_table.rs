@@ -8,8 +8,7 @@ pub struct ItemNameTable {
     unidentified_entries: HashMap<u16, String>,
 }
 
-const IDENTIFIED_PATH: &str = ragnarok_resources::table::IDENTIFIED_ITEM_NAME;
-const UNIDENTIFIED_PATH: &str = ragnarok_resources::table::UNIDENTIFIED_ITEM_NAME;
+const ITEM_INFO_LUB_PATH: &str = ragnarok_resources::table::ITEM_INFO_LUB;
 
 impl ItemNameTable {
     pub fn from_entries(
@@ -23,23 +22,21 @@ impl ItemNameTable {
     }
 
     pub fn load(grf: &GrfArchive) -> Self {
-        let identified_entries = grf
-            .read_file(IDENTIFIED_PATH)
-            .map(|data| lua_table::parse_item_name_table(&data))
-            .unwrap_or_default();
-        let unidentified_entries = grf
-            .read_file(UNIDENTIFIED_PATH)
-            .map(|data| lua_table::parse_item_name_table(&data))
+        let (identified_entries, unidentified_entries) = grf
+            .read_file(ITEM_INFO_LUB_PATH)
+            .ok()
+            .and_then(|data| lua_table::parse_item_info_lub(&data).ok())
+            .map(|info| (info.identified_name, info.unidentified_name))
             .unwrap_or_default();
 
         tracing::info!(
-            "Loaded item name tables from GRF: {} identified, {} unidentified",
+            "Loaded item name tables from {ITEM_INFO_LUB_PATH}: {} identified, {} unidentified",
             identified_entries.len(),
             unidentified_entries.len(),
         );
         if unidentified_entries.is_empty() {
             tracing::warn!(
-                "{UNIDENTIFIED_PATH} is missing: unidentified items will show their real name"
+                "{ITEM_INFO_LUB_PATH} is missing or unreadable: unidentified items will show their real name"
             );
         }
 
